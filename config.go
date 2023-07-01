@@ -18,6 +18,7 @@ type PeerConfig struct {
 	Endpoint     *string
 	KeepAlive    int
 	AllowedIPs   []netip.Prefix
+	ClientId	 string
 }
 
 // DeviceConfig contains the information to initiate a wireguard connection
@@ -248,6 +249,7 @@ func ParsePeers(cfg *ini.File, peers *[]PeerConfig) error {
 		peer := PeerConfig{
 			PreSharedKey: "0000000000000000000000000000000000000000000000000000000000000000",
 			KeepAlive:    0,
+			ClientId: "",
 		}
 
 		decoded, err := parseBase64KeyToHex(section, "PublicKey")
@@ -279,6 +281,10 @@ func ParsePeers(cfg *ini.File, peers *[]PeerConfig) error {
 				return err
 			}
 			peer.KeepAlive = value
+		}
+
+		if sectionKey, err := section.GetKey("ClientId"); err == nil {
+			peer.ClientId = sectionKey.String()
 		}
 
 		peer.AllowedIPs, err = parseAllowedIPs(section)

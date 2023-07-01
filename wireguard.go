@@ -42,6 +42,10 @@ func createIPCRequest(conf *DeviceConfig) (*DeviceSetting, error) {
 			request.WriteString(fmt.Sprintf("endpoint=%s\n", *peer.Endpoint))
 		}
 
+		if peer.ClientId != "" {
+			request.WriteString(fmt.Sprintf("client_id=%s\n", peer.ClientId))
+		}
+
 		if len(peer.AllowedIPs) > 0 {
 			for _, ip := range peer.AllowedIPs {
 				request.WriteString(fmt.Sprintf("allowed_ip=%s\n", ip.String()))
