@@ -1,0 +1,73 @@
+name: "Build Package"
+on:
+  repository_dispatch:
+  workflow_dispatch:
+
+jobs:
+  buildFlakePackage-linux:
+    outputs:
+      NAR_HASH: ${{ steps.collectHash.outputs.NAR_HASH }}
+    env:
+      FLAKE_PKG_PATH: '.#packages.x86_64-linux.wireproxy'
+      FLAKE_CROSS_PKG_PATH: '.#packages.x86_64-linux.wireproxy-cross-aarch64-linux'
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Checkout wireproxy code
+        uses: actions/checkout@v3
+        with:
+          ref: z/cf
+          path: src
+
+      - name: Checkout wireguard go code
+        uses: actions/checkout@v3
+        with:
+          repository: tywtyw2002/wireguard-go
+          ssh-key: ${{ secrets.WG_SSH_KEY }}
+          ref: z/feat-cf-fix
+          path: src/_lib/wireguard-mod
+
+      - name: Install Nix
+        uses: nixbuild/nix-quick-install-action@v24
+        with:
+          nix_conf: |
+            build-users-group =
+            experimental-features = nix-command flakes
+            substituters = https://cache.nixos.org/ https://nix-community.cachix.org https://cache.garnix.io https://c70-build-cache.cachix.org
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g= nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs= c70-build-cache.cachix.org-1:SrMlvWjLFODtcHEfCGy9O4/YtjMvAZOnAdpTChlR+/I=
+
+      - name: Pre-build patch
+        run: |
+          sed -i "s|/Users/tyw/git/wireguard-go|./_lib/wireguard-mod|" src/go.mod
+          wget https://github.com/tywtyw2002/nix-repo/raw/master/flake.lock
+          rm -rf .git
+          nix flake metadata
+          nix-env -iA cachix -f https://cachix.org/api/v1/install
+          nix profile install nixpkgs#jq
+          # nix-env -iA jq --file https://github.com/NixOS/nixpkgs/archive/nixos-23.05.tar.gz
+
+      - name: Build Wireproxy
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: |
+          nix build ${{env.FLAKE_PKG_PATH}}
+          nix path-info ${{env.FLAKE_PKG_PATH}} | cachix push ${{ secrets.CACHIX_REPO }}
+          nix derivation show ${{env.FLAKE_PKG_PATH}} | jq '.[] | (.name) + " => " + (.outputs.out.path)' >> pkg.hash
+
+      - name: Build Wireproxy CrossPkgs
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: |
+            nix build ${{env.FLAKE_CROSS_PKG_PATH}}
+            nix path-info ${{env.FLAKE_CROSS_PKG_PATH}} | cachix push ${{ secrets.CACHIX_REPO }}
+            nix derivation show ${{env.FLAKE_CROSS_PKG_PATH}} | jq '.[] | (.name) + " => " + (.outputs.out.path)' >> pkg.hash
+            # Upload cross golang
+            GODRV=$(nix derivation show ${{env.FLAKE_CROSS_PKG_PATH}} | jq -r ' .[] | .inputDrvs | keys |join("\n")' | grep "go-[0-9]")
+            nix derivation show $GODRV | jq -r '.[] | .outputs.out.path' | cachix push c70-build-cache
+
+      - name: Collect package cache hash
+        id: collectHash
+        run: echo "NAR_HASH=$(cat ./pkg.hash)" >> "$GITHUB_OUTPUT"
+
