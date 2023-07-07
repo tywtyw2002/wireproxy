@@ -4,14 +4,19 @@ on:
   workflow_dispatch:
 
 jobs:
-  buildFlakePackage-linux:
-    outputs:
-      NAR_HASH: ${{ steps.collectHash.outputs.NAR_HASH }}
-    env:
-      FLAKE_PKG_PATH: '.#packages.x86_64-linux.wireproxy'
-      FLAKE_CROSS_PKG_PATH: '.#packages.x86_64-linux.wireproxy-cross-aarch64-linux'
+  buildFlakePackage:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
 
-    runs-on: ubuntu-latest
+    env:
+      FLAKE_PKG_TEMPLATE: '.#packages.${ARCH}-${SYSTEM}.wireproxy${CROSS_OPT}'
+      FLAKE_CROSS_TEMPLATE: '-cross-${CROSS_ARCH}-${SYSTEM}'
+
     steps:
       - uses: actions/checkout@v3
 
@@ -40,34 +45,116 @@ jobs:
 
       - name: Pre-build patch
         run: |
-          sed -i "s|/Users/tyw/git/wireguard-go|./_lib/wireguard-mod|" src/go.mod
+          sed -i -e "s|/Users/tyw/git/wireguard-go|./_lib/wireguard-mod|" src/go.mod
           wget https://github.com/tywtyw2002/nix-repo/raw/master/flake.lock
           rm -rf .git
           nix flake metadata
           nix-env -iA cachix -f https://cachix.org/api/v1/install
           nix profile install nixpkgs#jq
-          # nix-env -iA jq --file https://github.com/NixOS/nixpkgs/archive/nixos-23.05.tar.gz
+
+      - name: Generate Flake Package Path
+        run: |
+          SYSTEM="linux"
+          ARCH="x86_64"
+          CROSS_ARCH="aarch64"
+          if [ "${{ runner.os }}" == "macOS" ]; then
+            SYSTEM="darwin"
+          fi
+          FLAKE_PKG_PATH=${{env.FLAKE_PKG_TEMPLATE}}
+          CROSS_OPT=${{env.FLAKE_CROSS_TEMPLATE}}
+          FLAKE_CROSS_PKG_PATH=${{env.FLAKE_PKG_TEMPLATE}}
+
+          echo "::group::[Info] Flake Path"
+          echo "FLAKE_PKG_PATH=$FLAKE_PKG_PATH"
+          echo "FLAKE_PKG_PATH=$FLAKE_PKG_PATH" >> $GITHUB_ENV
+          echo "FLAKE_CROSS_PKG_PATH=$FLAKE_CROSS_PKG_PATH"
+          echo "FLAKE_CROSS_PKG_PATH=$FLAKE_CROSS_PKG_PATH" >> $GITHUB_ENV
+          echo "FLAKE_SYSTEM=$SYSTEM" >> $GITHUB_ENV
+          echo "::endgroup"
+
+      - name: Check Wireproxy Cache
+        id: check_cache
+        run: |
+          hash=$(basename $(nix eval ${{env.FLAKE_PKG_PATH}} --raw ) | cut -d "-" -f 1)
+          cache_status=$(curl -s -o /dev/null -w "%{http_code}" -I https://${{ secrets.CACHIX_REPO }}.cachix.org/${hash}.narinfo)
+          if [ "$cache_status" != "200" ]; then
+            echo "NEED_BUILD=1" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build Wireproxy
+        if: ${{ steps.check_cache.outputs.NEED_BUILD }}
+        continue-on-error: true
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
           nix build ${{env.FLAKE_PKG_PATH}}
           nix path-info ${{env.FLAKE_PKG_PATH}} | cachix push ${{ secrets.CACHIX_REPO }}
-          nix derivation show ${{env.FLAKE_PKG_PATH}} | jq '.[] | (.name) + " => " + (.outputs.out.path)' >> pkg.hash
+
+      - name: Output Build Info -> Toml
+        run: |
+          SYSTEM="x86_64-${{env.FLAKE_SYSTEM}}"
+          echo "[[wireproxy]]" >> results.toml
+          nix eval --json "${{ env.FLAKE_PKG_PATH }}" \
+            --apply "x: {name=x.name; pname=x.pname; path=x.outPath; version=x.version; system=\"${SYSTEM}\";}" \
+            | jq -r 'to_entries|map("\(.key) = \"\(.value|tostring)\"")|.[]' >> results.toml
+          echo "" >> results.toml
+
+      - name: Check Wireproxy CrossPkgs Cache
+        id: check_cache_cross
+        run: |
+          hash=$(basename $(nix eval ${{env.FLAKE_CROSS_PKG_PATH}} --raw ) | cut -d "-" -f 1)
+          cache_status=$(curl -s -o /dev/null -w "%{http_code}" -I https://${{ secrets.CACHIX_REPO }}.cachix.org/${hash}.narinfo)
+          if [ "$cache_status" != "200" ]; then
+            echo "NEED_BUILD=1" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build Wireproxy CrossPkgs
+        if: ${{ steps.check_cache_cross.outputs.NEED_BUILD }}
+        continue-on-error: true
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
-            nix build ${{env.FLAKE_CROSS_PKG_PATH}}
-            nix path-info ${{env.FLAKE_CROSS_PKG_PATH}} | cachix push ${{ secrets.CACHIX_REPO }}
-            nix derivation show ${{env.FLAKE_CROSS_PKG_PATH}} | jq '.[] | (.name) + " => " + (.outputs.out.path)' >> pkg.hash
+            nix build ${{env.FLAKE_CROSS_PKG_PATH}} || on_err=true
             # Upload cross golang
-            GODRV=$(nix derivation show ${{env.FLAKE_CROSS_PKG_PATH}} | jq -r ' .[] | .inputDrvs | keys |join("\n")' | grep "go-[0-9]")
-            nix derivation show $GODRV | jq -r '.[] | .outputs.out.path' | cachix push c70-build-cache
+            nix eval ${{env.FLAKE_CROSS_PKG_PATH}}.go --raw | cachix push c70-build-cache
+            # upload cache
+            [ "$on_err" != "true" ] && \
+              nix path-info ${{env.FLAKE_CROSS_PKG_PATH}} | cachix push ${{ secrets.CACHIX_REPO }} \
+              || exit 1
 
-      - name: Collect package cache hash
-        id: collectHash
-        run: echo "NAR_HASH=$(cat ./pkg.hash)" >> "$GITHUB_OUTPUT"
+      - name: Output Cross Build Info -> Toml
+        run: |
+          SYSTEM="aarch64-${{env.FLAKE_SYSTEM}}"
+          echo "[[wireproxy]]" >> results.toml
+          nix eval --json "${{ env.FLAKE_CROSS_PKG_PATH }}" \
+            --apply "x: {name=x.name; pname=x.pname; path=x.outPath; version=x.version; system=\"${SYSTEM}\";}" \
+            | jq -r 'to_entries|map("\(.key) = \"\(.value|tostring)\"")|.[]' >> results.toml
+          echo "" >> results.toml
 
+      - run: |
+          mkdir -p build/wireproxy
+          cp results.toml build/wireproxy/${{matrix.os}}_results.toml
+          ls -R build
+
+      - name: Post Toml Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: cahced_toml_results
+          path: ./build/
+
+  uploadBuildResults:
+    runs-on: ubuntu-latest
+    needs:
+      - buildFlakePackage
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: cahced_toml_results
+          path: ./build/
+
+      - run: |
+          ls -R
+          find .

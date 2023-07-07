@@ -2,11 +2,12 @@
   description = "Wireproxy Mod build service";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    upstream.url = "github:tywtyw2002/nix-repo/master";
   };
 
-  outputs = { nixpkgs, ... }:
+  outputs = { upstream, ... }:
     let
+      nixpkgs = upstream.inputs.nixpkgs;
       allSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forEachSystem = allSystems: f: nixpkgs.lib.genAttrs allSystems (system: f system);
       forAllSystems = forEachSystem allSystems;
