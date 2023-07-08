@@ -93,7 +93,7 @@ jobs:
       - name: Output Build Info -> Toml
         run: |
           SYSTEM="x86_64-${{env.FLAKE_SYSTEM}}"
-          echo "[[wireproxy]]" >> results.toml
+          echo "[${SYSTEM}]" >> results.toml
           nix eval --json "${{ env.FLAKE_PKG_PATH }}" \
             --apply "x: {name=x.name; pname=x.pname; path=x.outPath; version=x.version; system=\"${SYSTEM}\";}" \
             | jq -r 'to_entries|map("\(.key) = \"\(.value|tostring)\"")|.[]' >> results.toml
@@ -125,7 +125,7 @@ jobs:
       - name: Output Cross Build Info -> Toml
         run: |
           SYSTEM="aarch64-${{env.FLAKE_SYSTEM}}"
-          echo "[[wireproxy]]" >> results.toml
+          echo "[${SYSTEM}]" >> results.toml
           nix eval --json "${{ env.FLAKE_CROSS_PKG_PATH }}" \
             --apply "x: {name=x.name; pname=x.pname; path=x.outPath; version=x.version; system=\"${SYSTEM}\";}" \
             | jq -r 'to_entries|map("\(.key) = \"\(.value|tostring)\"")|.[]' >> results.toml
@@ -155,6 +155,64 @@ jobs:
           name: cahced_toml_results
           path: ./build/
 
-      - run: |
-          ls -R
-          find .
+      - name: Generate Packages Results
+        run: |
+          mkdir results
+          for d in ./build/*; do
+            pkg_name=$(basename $d)
+            cat $d/*.toml > ./results/$pkg_name.toml
+          done
+
+      - name: Upload merged toml
+        uses: actions/upload-artifact@v3
+        with:
+          name: packages_toml
+          path: ./results/
+
+  nixPullRequests:
+    runs-on: ubuntu-latest
+    needs:
+      - uploadBuildResults
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Checkout Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: packages_toml
+          path: ./results/
+
+      - name: Checkout nix repo
+        uses: actions/checkout@v3
+        with:
+          repository: tywtyw2002/nix-repo
+          token: ${{ secrets.PAT_TOKEN }}
+          path: ./work_dir/nix-repo
+
+      - name: Update Wireproxy Toml
+        run: |
+          mkdir -p ./work_dir/nix-repo/pkgs/wireproxy/
+          cp -f ./results/wireproxy.toml ./work_dir/nix-repo/pkgs/z_packages/wireproxy.toml
+
+      # - name: Commit and push changes
+      #   uses: stefanzweifel/git-auto-commit-action@v4
+      #   with:
+      #     repository: ./work_dir/nix-repo
+      #     branch: auto_pkgs_hash_update
+      #     create_branch: true
+      #     commit_message: "chore(auto): update private packages hash."
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          path: ./work_dir/nix-repo
+          commit-message: "chore(bot): update private packages hash."
+          title: "[Bot] Update packages hash"
+          branch: auto_pkgs_hash_update
+          base: master
+          delete-branch: true
+          body: |
+            Action Ref:
+              - https://github.com/tywtyw2002/wireproxy/actions/runs/${{ github.run_id }}
