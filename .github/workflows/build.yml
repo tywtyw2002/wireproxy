@@ -50,7 +50,7 @@ jobs:
           rm -rf .git
           nix flake metadata
           nix-env -iA cachix -f https://cachix.org/api/v1/install
-          nix profile install nixpkgs#jq
+          nix-env -iA jq -f https://github.com/tywtyw2002/nx-direct/tarball/nx
 
       - name: Generate Flake Package Path
         run: |
