@@ -40,6 +40,7 @@
           in
           {
             wireproxy = pkgs.callPackage ./package.nix { };
+            wireproxy-musl = pkgs.callPackage ./package-musl.nix { };
           }
         )
       );
