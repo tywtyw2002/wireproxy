@@ -9,7 +9,7 @@ buildGoModule rec {
 
   src = lib.cleanSource ./src;
 
-  vendorSha256 = "sha256-JSRKp99duO0RnBdj3IKBTqAzvBVrYLmOqxmHGHbcldo=";
+  vendorSha256 = "sha256-w89v4CuwJVAQrQf+EWD5fUOkEfk5AggTe5RDSI+hUnM=";
   nativeBuildInputs = [ musl ];
   CGO_ENABLED = 0;
 
