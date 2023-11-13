@@ -15,7 +15,7 @@ jobs:
 
     env:
       FLAKE_PKG_TEMPLATE: '.#packages.${ARCH}-${SYSTEM}.wireproxy${CROSS_OPT}'
-      FLAKE_CROSS_TEMPLATE: '-cross-${CROSS_ARCH}-${SYSTEM}'
+      FLAKE_CROSS_TEMPLATE: '-cross-${CROSS_ARCH}'
 
     steps:
       - uses: actions/checkout@v3
