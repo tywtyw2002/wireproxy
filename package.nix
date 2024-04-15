@@ -8,7 +8,7 @@ buildGoModule rec {
 
   src = lib.cleanSource ./src;
 
-  vendorSha256 = "sha256-w89v4CuwJVAQrQf+EWD5fUOkEfk5AggTe5RDSI+hUnM=";
+  vendorHash = "sha256-w89v4CuwJVAQrQf+EWD5fUOkEfk5AggTe5RDSI+hUnM=";
 
   meta = with lib; {
     description = "A wireguard client that exposes itself as a socks5/http proxy or tunnels.(mod)";
