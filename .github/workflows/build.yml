@@ -116,7 +116,7 @@ jobs:
         run: |
             nix build ${{env.FLAKE_CROSS_PKG_PATH}} || on_err=true
             # Upload cross golang
-            nix eval ${{env.FLAKE_CROSS_PKG_PATH}}.go --raw | cachix push c70-build-cache
+            # nix eval ${{env.FLAKE_CROSS_PKG_PATH}}.go --raw | cachix push c70-build-cache
             # upload cache
             [ "$on_err" != "true" ] && \
               nix path-info ${{env.FLAKE_CROSS_PKG_PATH}} | cachix push ${{ secrets.CACHIX_REPO }} \

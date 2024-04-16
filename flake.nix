@@ -23,26 +23,23 @@
         }:
         let
           inherit (lib.attrsets) filterAttrs;
-          onlySystems = s: avaliableSystems: modules:
-            if (builtins.elem s avaliableSystems)
-            then modules
-            else null;
-          mkCrossPackages = crossArch: modulePath:
-            let
-              localType = lib.lists.last (lib.splitString "-" system);
-              crossSystem = "${crossArch}-${localType}";
-              crossPkgs = import inputs.nixpkgs {
-                localSystem = system;
-                crossSystem = crossSystem;
-              };
-            in
-            if (system != crossSystem)
-            then crossPkgs.callPackage modulePath { }
-            else null;
+          sSys = lib.splitString "-" system;
+          osType = lib.lists.last sSys;
+          archType = builtins.elemAt sSys 0;
+          goCrossOverride = mod:
+            if (archType != "x86_64")
+            then null
+            else
+              mod.overrideAttrs (old:
+                old
+                // {
+                  GOOS = osType;
+                  GOARCH = "arm64";
+                });
           allPackages = {
             wireproxy = pkgs.callPackage ./package.nix { };
-            wireproxy-musl = onlySystems system [ "x86_64-linux" "aarch64-linux" ] (pkgs.callPackage ./package-musl.nix { });
-            wireproxy-cross-aarch64 = mkCrossPackages "aarch64" ./package.nix;
+            # cross pkgs need in host system.
+            wireproxy-cross-aarch64 = goCrossOverride (pkgs.callPackage ./package.nix { });
           };
         in
         {

@@ -2,11 +2,12 @@
 , buildGoModule
 ,
 }:
-buildGoModule rec {
+buildGoModule {
   pname = "wireproxy";
   version = "1.0.5-dev";
 
   src = lib.cleanSource ./src;
+  CGO_ENABLED = 0;
 
   vendorHash = "sha256-w89v4CuwJVAQrQf+EWD5fUOkEfk5AggTe5RDSI+hUnM=";
 
